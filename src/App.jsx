@@ -18,7 +18,7 @@ const EXERCISE_CONFIG = {
 };
 
 // !!! מחק את הטקסט בגרשיים והדבק כאן את ה-Client ID שלך !!!
-const GOOGLE_CLIENT_ID = "348003759546-j7f6ogvj8krv5s36dc9omj8qpbo8u1v3.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "348003759546-rl3l7bpekqct6gve9vmsupm2qsbcvpg4.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/calendar.events";
 
 export default function App() {
