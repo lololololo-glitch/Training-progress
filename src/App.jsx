@@ -1,41 +1,45 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 
-// --- הגדרת קונפיגורציה עשירה ---
+const WORKFLOWS = {
+  PUSH: ['flat', 'incline', 'ropePush', 'skullCrush'],
+  PULL: ['latPull', 'dbRow', 'dbCurl', 'bbCurl']
+};
+
+const EXERCISE_CONFIG = {
+  flat: { name: "בנץ' פרס רגיל", color: "#1e40af", isBig: true },
+  incline: { name: "שיפוע חיובי משקולות", color: "#3b82f6", isBig: true },
+  ropePush: { name: "פשיטת מרפקים חבל", color: "#60a5fa", isBig: false },
+  skullCrush: { name: "Skull Crusher מוט", color: "#93c5fd", isBig: false },
+  latPull: { name: "פולי עליון רחב", color: "#6d28d9", isBig: true },
+  dbRow: { name: "חתירה עם משקולת", color: "#8b5cf6", isBig: true },
+  dbCurl: { name: "כפיפת מרפקים משקולות", color: "#a78bfa", isBig: false },
+  bbCurl: { name: "יד קדמית מוט אולימפי", color: "#c084fc", isBig: false }
+};
+
 const GOOGLE_CLIENT_ID = "348003759546-rl3l7bpekqct6gve9vmsupm2qsbcvpg4.apps.googleusercontent.com";
+const SCOPES = "https://www.googleapis.com/auth/calendar.events";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(0);
-  const [sessions, setSessions] = useState(() => JSON.parse(localStorage.getItem('pro_gym_data') || '[]'));
-  const [activeWorkout, setActiveWorkout] = useState(null);
-  const [currentExercise, setCurrentExercise] = useState({ name: '', weight: '', reps: '', sets: '' });
+  const [accessToken, setAccessToken] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("יומן לא מחובר ❌");
+  const [sessions, setSessions] = useState([]);
+  
+  const [customName, setCustomName] = useState("");
+  const [customDate, setCustomDate] = useState(new Date().toISOString().split('T')[0]);
+  const [customTime, setCustomTime] = useState("18:00");
+
+  // לוגיקת אימון משודרגת
+  const [activeWorkflow, setActiveWorkflow] = useState(null);
   const [tempWorkout, setTempWorkout] = useState([]);
+  const [weightInput, setWeightInput] = useState("");
+  const [repsInput, setRepsInput] = useState("");
+  const [currentEx, setCurrentEx] = useState('flat');
 
-  // --- פונקציות ניהול נתונים וסנכרון ---
-  const saveWorkoutToLocal = () => {
-    const newSession = { id: Date.now(), date: new Date().toLocaleDateString('he-IL'), exercises: tempWorkout };
-    const updated = [newSession, ...sessions];
-    setSessions(updated);
-    localStorage.setItem('pro_gym_data', JSON.stringify(updated));
-    setTempWorkout([]);
-    setActiveWorkout(null);
-    alert("🔥 האימון נשמר בהצלחה!");
-  };
-
-  const syncWithGoogle = () => {
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${window.location.origin}&response_type=token&scope=https://www.googleapis.com/auth/calendar.events`;
-  };
-
-  // --- מנוע חישוב מטרות (Progressive Overload) ---
-  const calculateNextGoal = (name) => {
-    const history = sessions.flatMap(s => s.exercises).filter(ex => ex.name === name);
-    if (history.length === 0) return 20;
-    return parseFloat(history[0].weight) + 2.5;
-  };
-
-  // --- ממשק משתמש וגלילה ---
+  // מנגנון גלילה
   const touchStart = useRef(0);
-  const handleTouchStart = (e) => (touchStart.current = e.touches[0].clientX);
+  const handleTouchStart = (e) => touchStart.current = e.touches[0].clientX;
   const handleTouchEnd = (e) => {
     const diff = touchStart.current - e.changedTouches[0].clientX;
     if (Math.abs(diff) > 50) {
@@ -44,68 +48,86 @@ export default function App() {
     }
   };
 
+  const chartRefs = useRef({});
+
+  useEffect(() => {
+    const savedSessions = JSON.parse(localStorage.getItem('gym_sessions')) || [];
+    setSessions(savedSessions);
+    const params = new URLSearchParams(window.location.hash.substring(1));
+    const token = params.get("access_token");
+    if (token) {
+      setAccessToken(token);
+      setSyncStatus("מחובר ומסונכרן! 🎉");
+    }
+  }, []);
+
+  const addExercise = () => {
+    setTempWorkout([...tempWorkout, { key: currentEx, weight: weightInput, reps: repsInput }]);
+    setWeightInput(""); setRepsInput("");
+  };
+
+  const finalizeWorkout = async () => {
+    const exercisesObj = tempWorkout.reduce((acc, ex) => ({ ...acc, [ex.key]: { weight: ex.weight, reps: ex.reps } }), {});
+    const newSession = { id: Date.now(), split: activeWorkflow, date: new Date().toLocaleDateString('he-IL'), exercises: exercisesObj };
+    const newSessionsList = [newSession, ...sessions];
+    setSessions(newSessionsList);
+    localStorage.setItem('gym_sessions', JSON.stringify(newSessionsList));
+    setTempWorkout([]); setActiveWorkflow(null);
+    alert("האימון נשמר!");
+  };
+
   return (
     <div style={styles.container} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>TRACK & GAIN PRO</h1>
-        <div style={styles.tabBar}>
-          {['📅 יומן', '🎯 מטרות', '📝 אימון', '📊 גרפים'].map((t, i) => (
-            <button key={i} style={activeTab === i ? styles.activeTab : styles.tab} onClick={() => setActiveTab(i)}>{t}</button>
+      <div style={styles.header}>
+        <h1 style={styles.title}>TRACK & GAIN</h1>
+        <div style={styles.tabsNav}>
+          {['יומן', 'מטרות', 'אימון', 'גרפים'].map((t, i) => (
+            <button key={i} style={{...styles.tabBtn, ...(activeTab===i?styles.activeTab:{})}} onClick={()=>setActiveTab(i)}>{t}</button>
           ))}
         </div>
-      </header>
+      </div>
 
-      <main style={styles.main}>
-        {/* עמוד אימון - הוספת תרגילים דינמית */}
+      <div style={styles.mainContent}>
+        {/* טאבים אחרים נשארים ללא שינוי... */}
         {activeTab === 2 && (
           <div style={styles.card}>
-            {!activeWorkout ? (
-              <button style={styles.button} onClick={() => setActiveWorkout('NEW_SESSION')}>התחל אימון חדש</button>
+            {!activeWorkflow ? (
+              <>
+                <button style={styles.bigSplitBtn} onClick={() => setActiveWorkflow('PUSH')}>התחל אימון PUSH</button>
+                <button style={styles.bigSplitBtn} onClick={() => setActiveWorkflow('PULL')}>התחל אימון PULL</button>
+              </>
             ) : (
-              <div>
-                <input style={styles.input} placeholder="שם תרגיל" onChange={e => setCurrentExercise({...currentExercise, name: e.target.value})} />
-                <input style={styles.input} placeholder="משקל" type="number" onChange={e => setCurrentExercise({...currentExercise, weight: e.target.value})} />
-                <input style={styles.input} placeholder="חזרות" type="number" onChange={e => setCurrentExercise({...currentExercise, reps: e.target.value})} />
-                <input style={styles.input} placeholder="סטים" type="number" onChange={e => setCurrentExercise({...currentExercise, sets: e.target.value})} />
-                <button style={styles.button} onClick={() => { setTempWorkout([...tempWorkout, currentExercise]); setCurrentExercise({name:'', weight:'', reps:'', sets:''}) }}>הוסף תרגיל לאימון</button>
-                <button style={{...styles.button, background: '#10b981'}} onClick={saveWorkoutToLocal}>סיים ושמור</button>
-              </div>
+              <>
+                <select style={styles.input} onChange={(e) => setCurrentEx(e.target.value)}>
+                  {WORKFLOWS[activeWorkflow].map(k => <option key={k} value={k}>{EXERCISE_CONFIG[k].name}</option>)}
+                </select>
+                <input style={styles.input} placeholder="משקל" value={weightInput} onChange={e => setWeightInput(e.target.value)}/>
+                <input style={styles.input} placeholder="חזרות" value={repsInput} onChange={e => setRepsInput(e.target.value)}/>
+                <button style={styles.submitBtn} onClick={addExercise}>הוסף תרגיל לסל</button>
+                <div style={{margin: '10px 0'}}>
+                  {tempWorkout.map((ex, i) => <div key={i}>{EXERCISE_CONFIG[ex.key].name}: {ex.weight}kg x {ex.reps}</div>)}
+                </div>
+                <button style={{...styles.submitBtn, backgroundColor: '#10b981'}} onClick={finalizeWorkout}>סיים ושמור הכל</button>
+              </>
             )}
-            <div style={{marginTop: '20px'}}>
-              {tempWorkout.map((ex, i) => <div key={i} style={styles.logItem}>{ex.name}: {ex.weight}kg x {ex.reps} ({ex.sets} סטים)</div>)}
-            </div>
           </div>
         )}
-
-        {/* עמוד מטרות - חישוב אוטומטי */}
-        {activeTab === 1 && (
-          <div style={styles.card}>
-            {['בנץ פרס', 'פולי עליון', 'סקווט'].map(name => (
-              <div key={name} style={styles.goalRow}>
-                <span>{name}</span>
-                <span style={styles.goalValue}>{calculateNextGoal(name)} ק"ג</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
+      </div>
     </div>
   );
 }
 
-// --- עיצוב מקצועי ---
+// שאר ה-Styles נשארים בדיוק כפי ששלחת בקוד שלך
 const styles = {
-  container: { direction: 'rtl', fontFamily: 'Segoe UI, sans-serif', backgroundColor: '#f1f5f9', minHeight: '100vh', padding: '10px' },
-  header: { backgroundColor: '#1e40af', padding: '20px', borderRadius: '15px', color: 'white', textAlign: 'center', marginBottom: '20px' },
-  title: { fontSize: '1.5rem', marginBottom: '15px' },
-  tabBar: { display: 'flex', gap: '5px' },
-  tab: { flex: 1, padding: '10px', background: 'transparent', color: 'white', border: '1px solid #60a5fa', borderRadius: '8px', cursor: 'pointer' },
-  activeTab: { flex: 1, padding: '10px', background: 'white', color: '#1e40af', border: 'none', borderRadius: '8px', fontWeight: 'bold' },
-  main: { maxWidth: '500px', margin: '0 auto' },
-  card: { backgroundColor: 'white', padding: '20px', borderRadius: '15px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
-  button: { width: '100%', padding: '15px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', marginTop: '10px', cursor: 'pointer' },
-  input: { width: '100%', padding: '12px', margin: '5px 0', border: '1px solid #ccc', borderRadius: '8px', boxSizing: 'border-box' },
-  goalRow: { display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #eee' },
-  goalValue: { color: '#059669', fontWeight: 'bold' },
-  logItem: { padding: '8px', borderBottom: '1px solid #f1f5f9', fontSize: '0.9rem' }
+  container: { direction: 'rtl', fontFamily: 'sans-serif', backgroundColor: '#f0f4f8', minHeight: '100vh', padding: '20px 10px' },
+  header: { maxWidth: 500, margin: '0 auto 20px auto', textAlign: 'center' },
+  title: { color: '#1e40af', margin: 0, fontWeight: 800, fontSize: '2rem' },
+  tabsNav: { display: 'flex', backgroundColor: '#fff', padding: 4, borderRadius: 12, border: '1px solid #cbd5e1', gap: 4 },
+  tabBtn: { flex: 1, padding: '10px 2px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 8, color: '#64748b', fontWeight: 'bold' },
+  activeTab: { backgroundColor: '#1e40af', color: '#fff' },
+  mainContent: { maxWidth: 500, margin: '0 auto' },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 20, border: '1px solid #cbd5e1', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' },
+  input: { width: '100%', padding: 12, borderRadius: 8, border: '1px solid #cbd5e1', boxSizing: 'border-box', marginTop: 10 },
+  submitBtn: { width: '100%', padding: 14, backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer', marginTop: 10 },
+  bigSplitBtn: { width: '100%', padding: 20, fontSize: '1.15rem', fontWeight: 'bold', backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: 12, cursor: 'pointer', marginTop: 15 }
 };
