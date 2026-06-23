@@ -1,126 +1,91 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 
-// --- הגדרת רכיבי האפליקציה ---
-const APP_NAME = "TRACK & GAIN PRO";
-
-// --- רשימת תרגילים מפורטת (ללא לולאות כדי לשמור על קריאות ופירוט) ---
-const EXERCISE_LIST = [
-  { id: 'flat', name: "בנץ' פרס רגיל" },
-  { id: 'incline', name: "שיפוע חיובי משקולות" },
-  { id: 'ropePush', name: "פשיטת מרפקים חבל" },
-  { id: 'skullCrush', name: "Skull Crusher מוט" },
-  { id: 'latPull', name: "פולי עליון רחב" },
-  { id: 'dbRow', name: "חתירה עם משקולת" },
-  { id: 'dbCurl', name: "כפיפת מרפקים משקולות" },
-  { id: 'bbCurl', name: "יד קדמית מוט אולימפי" }
-];
+// --- הגדרת קונפיגורציה עשירה ---
+const GOOGLE_CLIENT_ID = "348003759546-rl3l7bpekqct6gve9vmsupm2qsbcvpg4.apps.googleusercontent.com";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(0);
-  const [sessions, setSessions] = useState([]);
-  const [activeWorkflow, setActiveWorkflow] = useState(null);
-  const [weight, setWeight] = useState("");
-  const [reps, setReps] = useState("");
+  const [sessions, setSessions] = useState(() => JSON.parse(localStorage.getItem('pro_gym_data') || '[]'));
+  const [activeWorkout, setActiveWorkout] = useState(null);
+  const [currentExercise, setCurrentExercise] = useState({ name: '', weight: '', reps: '', sets: '' });
+  const [tempWorkout, setTempWorkout] = useState([]);
 
-  // --- טעינת נתונים ראשונית ---
-  useEffect(() => {
-    const data = localStorage.getItem('gym_data');
-    if (data) {
-      setSessions(JSON.parse(data));
-    }
-  }, []);
-
-  // --- פונקציות ניהול ניווט ---
-  const goToDiary = () => setActiveTab(0);
-  const goToGoals = () => setActiveTab(1);
-  const goToWorkout = () => setActiveTab(2);
-  const goToGraphs = () => setActiveTab(3);
-
-  // --- פונקציות לוגיקת אימון ---
-  const startPush = () => setActiveWorkflow('PUSH');
-  const startPull = () => setActiveWorkflow('PULL');
-  
-  const saveSession = () => {
-    const newSession = {
-      date: new Date().toLocaleDateString(),
-      weight: weight,
-      reps: reps,
-      type: activeWorkflow
-    };
-    
+  // --- פונקציות ניהול נתונים וסנכרון ---
+  const saveWorkoutToLocal = () => {
+    const newSession = { id: Date.now(), date: new Date().toLocaleDateString('he-IL'), exercises: tempWorkout };
     const updated = [newSession, ...sessions];
     setSessions(updated);
-    localStorage.setItem('gym_data', JSON.stringify(updated));
-    
-    alert("האימון נשמר בהצלחה!");
-    setActiveWorkflow(null);
-    setWeight("");
-    setReps("");
+    localStorage.setItem('pro_gym_data', JSON.stringify(updated));
+    setTempWorkout([]);
+    setActiveWorkout(null);
+    alert("🔥 האימון נשמר בהצלחה!");
   };
 
-  // --- מבנה ממשק המשתמש (UI) ---
+  const syncWithGoogle = () => {
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${window.location.origin}&response_type=token&scope=https://www.googleapis.com/auth/calendar.events`;
+  };
+
+  // --- מנוע חישוב מטרות (Progressive Overload) ---
+  const calculateNextGoal = (name) => {
+    const history = sessions.flatMap(s => s.exercises).filter(ex => ex.name === name);
+    if (history.length === 0) return 20;
+    return parseFloat(history[0].weight) + 2.5;
+  };
+
+  // --- ממשק משתמש וגלילה ---
+  const touchStart = useRef(0);
+  const handleTouchStart = (e) => (touchStart.current = e.touches[0].clientX);
+  const handleTouchEnd = (e) => {
+    const diff = touchStart.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 50) {
+      if (diff > 0 && activeTab < 3) setActiveTab(activeTab + 1);
+      else if (diff < 0 && activeTab > 0) setActiveTab(activeTab - 1);
+    }
+  };
+
   return (
-    <div style={styles.container}>
+    <div style={styles.container} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <header style={styles.header}>
-        <h1 style={styles.headerTitle}>{APP_NAME}</h1>
-        <div style={styles.tabsContainer}>
-          <button style={activeTab === 0 ? styles.activeTab : styles.tab} onClick={goToDiary}>יומן</button>
-          <button style={activeTab === 1 ? styles.activeTab : styles.tab} onClick={goToGoals}>מטרות</button>
-          <button style={activeTab === 2 ? styles.activeTab : styles.tab} onClick={goToWorkout}>אימון</button>
-          <button style={activeTab === 3 ? styles.activeTab : styles.tab} onClick={goToGraphs}>גרפים</button>
+        <h1 style={styles.title}>TRACK & GAIN PRO</h1>
+        <div style={styles.tabBar}>
+          {['📅 יומן', '🎯 מטרות', '📝 אימון', '📊 גרפים'].map((t, i) => (
+            <button key={i} style={activeTab === i ? styles.activeTab : styles.tab} onClick={() => setActiveTab(i)}>{t}</button>
+          ))}
         </div>
       </header>
 
       <main style={styles.main}>
-        {/* לשונית יומן */}
-        {activeTab === 0 && (
-          <div style={styles.card}>
-            <h2>היסטוריית אימונים</h2>
-            {sessions.map((s, i) => (
-              <div key={i} style={styles.logItem}>{s.date} - {s.weight} ק"ג</div>
-            ))}
-          </div>
-        )}
-
-        {/* לשונית מטרות */}
-        {activeTab === 1 && (
-          <div style={styles.card}>
-            <h2>מטרות לאימון הבא</h2>
-            {EXERCISE_LIST.map((ex, i) => (
-              <div key={i} style={styles.goalItem}>
-                <span style={styles.goalText}>{ex.name}:</span>
-                <span style={styles.goalValue}>+2.5 ק"ג מהאחרון</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* לשונית אימון */}
+        {/* עמוד אימון - הוספת תרגילים דינמית */}
         {activeTab === 2 && (
           <div style={styles.card}>
-            {!activeWorkflow ? (
-              <>
-                <h2>בחר סוג אימון</h2>
-                <button style={styles.button} onClick={startPush}>אימון דחיפה (PUSH)</button>
-                <button style={styles.button} onClick={startPull}>אימון משיכה (PULL)</button>
-              </>
+            {!activeWorkout ? (
+              <button style={styles.button} onClick={() => setActiveWorkout('NEW_SESSION')}>התחל אימון חדש</button>
             ) : (
               <div>
-                <h2>מזין נתונים ל-{activeWorkflow}</h2>
-                <input style={styles.input} type="number" placeholder="משקל" value={weight} onChange={(e) => setWeight(e.target.value)} />
-                <input style={styles.input} type="number" placeholder="חזרות" value={reps} onChange={(e) => setReps(e.target.value)} />
-                <button style={styles.button} onClick={saveSession}>שמור ושלוח ליומן</button>
+                <input style={styles.input} placeholder="שם תרגיל" onChange={e => setCurrentExercise({...currentExercise, name: e.target.value})} />
+                <input style={styles.input} placeholder="משקל" type="number" onChange={e => setCurrentExercise({...currentExercise, weight: e.target.value})} />
+                <input style={styles.input} placeholder="חזרות" type="number" onChange={e => setCurrentExercise({...currentExercise, reps: e.target.value})} />
+                <input style={styles.input} placeholder="סטים" type="number" onChange={e => setCurrentExercise({...currentExercise, sets: e.target.value})} />
+                <button style={styles.button} onClick={() => { setTempWorkout([...tempWorkout, currentExercise]); setCurrentExercise({name:'', weight:'', reps:'', sets:''}) }}>הוסף תרגיל לאימון</button>
+                <button style={{...styles.button, background: '#10b981'}} onClick={saveWorkoutToLocal}>סיים ושמור</button>
               </div>
             )}
+            <div style={{marginTop: '20px'}}>
+              {tempWorkout.map((ex, i) => <div key={i} style={styles.logItem}>{ex.name}: {ex.weight}kg x {ex.reps} ({ex.sets} סטים)</div>)}
+            </div>
           </div>
         )}
 
-        {/* לשונית גרפים */}
-        {activeTab === 3 && (
+        {/* עמוד מטרות - חישוב אוטומטי */}
+        {activeTab === 1 && (
           <div style={styles.card}>
-            <h2>התקדמות אישית</h2>
-            <p>מערכת הגרפים נמצאת בטעינה...</p>
+            {['בנץ פרס', 'פולי עליון', 'סקווט'].map(name => (
+              <div key={name} style={styles.goalRow}>
+                <span>{name}</span>
+                <span style={styles.goalValue}>{calculateNextGoal(name)} ק"ג</span>
+              </div>
+            ))}
           </div>
         )}
       </main>
@@ -128,79 +93,19 @@ export default function App() {
   );
 }
 
-// --- אובייקט עיצוב (Styles) מורחב ומפורט ---
+// --- עיצוב מקצועי ---
 const styles = {
-  container: { 
-    direction: 'rtl', 
-    fontFamily: 'Segoe UI, Tahoma, sans-serif', 
-    backgroundColor: '#eef2f7', 
-    minHeight: '100vh', 
-    padding: '20px' 
-  },
-  header: { 
-    backgroundColor: '#1e40af', 
-    padding: '25px', 
-    borderRadius: '20px', 
-    textAlign: 'center', 
-    color: '#ffffff',
-    boxShadow: '0 4px 10px rgba(0,0,0,0.2)'
-  },
-  headerTitle: { fontSize: '2rem', marginBottom: '20px' },
-  tabsContainer: { display: 'flex', gap: '10px' },
-  tab: { 
-    flex: 1, 
-    padding: '12px', 
-    backgroundColor: '#3b82f6', 
-    color: '#fff', 
-    border: 'none', 
-    borderRadius: '10px', 
-    cursor: 'pointer' 
-  },
-  activeTab: { 
-    flex: 1, 
-    padding: '12px', 
-    backgroundColor: '#ffffff', 
-    color: '#1e40af', 
-    border: 'none', 
-    borderRadius: '10px', 
-    cursor: 'pointer',
-    fontWeight: 'bold'
-  },
-  main: { maxWidth: '600px', margin: '30px auto' },
-  card: { 
-    backgroundColor: '#ffffff', 
-    padding: '25px', 
-    borderRadius: '20px', 
-    boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
-    marginBottom: '20px' 
-  },
-  button: { 
-    width: '100%', 
-    padding: '18px', 
-    backgroundColor: '#1e40af', 
-    color: '#fff', 
-    border: 'none', 
-    borderRadius: '12px', 
-    marginTop: '15px', 
-    fontSize: '1.1rem', 
-    cursor: 'pointer' 
-  },
-  input: { 
-    width: '100%', 
-    padding: '15px', 
-    margin: '10px 0', 
-    borderRadius: '10px', 
-    border: '1px solid #cbd5e1', 
-    boxSizing: 'border-box' 
-  },
-  logItem: { padding: '10px 0', borderBottom: '1px solid #f1f5f9' },
-  goalItem: { display: 'flex', justifyContent: 'space-between', padding: '12px 0' },
-  goalText: { fontWeight: '600' },
-  goalValue: { color: '#059669', fontWeight: 'bold' }
+  container: { direction: 'rtl', fontFamily: 'Segoe UI, sans-serif', backgroundColor: '#f1f5f9', minHeight: '100vh', padding: '10px' },
+  header: { backgroundColor: '#1e40af', padding: '20px', borderRadius: '15px', color: 'white', textAlign: 'center', marginBottom: '20px' },
+  title: { fontSize: '1.5rem', marginBottom: '15px' },
+  tabBar: { display: 'flex', gap: '5px' },
+  tab: { flex: 1, padding: '10px', background: 'transparent', color: 'white', border: '1px solid #60a5fa', borderRadius: '8px', cursor: 'pointer' },
+  activeTab: { flex: 1, padding: '10px', background: 'white', color: '#1e40af', border: 'none', borderRadius: '8px', fontWeight: 'bold' },
+  main: { maxWidth: '500px', margin: '0 auto' },
+  card: { backgroundColor: 'white', padding: '20px', borderRadius: '15px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
+  button: { width: '100%', padding: '15px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', marginTop: '10px', cursor: 'pointer' },
+  input: { width: '100%', padding: '12px', margin: '5px 0', border: '1px solid #ccc', borderRadius: '8px', boxSizing: 'border-box' },
+  goalRow: { display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #eee' },
+  goalValue: { color: '#059669', fontWeight: 'bold' },
+  logItem: { padding: '8px', borderBottom: '1px solid #f1f5f9', fontSize: '0.9rem' }
 };
-
-// ... הערות להשלמת הפירוט (שורות 250-330):
-// ... כאן מתווספים מרווחים מתוכננים כדי לשפר את חווית הפיתוח.
-// ... ארגון הקוד בצורה כזו מאפשר לך להבין בדיוק איפה כל פונקציה יושבת.
-// ... הוספת לוגיקת ה-API של גוגל תתפוס את השורות הבאות בתהליך העבודה שלך.
-// ... הקוד הזה הוא הבסיס הכי יציב שיש לכל אפליקציית כושר מקצועית.
