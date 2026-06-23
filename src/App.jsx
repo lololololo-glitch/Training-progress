@@ -26,19 +26,23 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState("יומן לא מחובר ❌");
   const [sessions, setSessions] = useState([]);
   
+  // States for Activities (Tab 0)
+  const [pendingActivities, setPendingActivities] = useState([]);
   const [customName, setCustomName] = useState("");
   const [customDate, setCustomDate] = useState(new Date().toISOString().split('T')[0]);
   const [customTime, setCustomTime] = useState("18:00");
 
+  // States for Workouts (Tab 2)
   const [activeWorkflow, setActiveWorkflow] = useState(null);
+  const [tempWorkoutData, setTempWorkoutData] = useState({});
   const [weightInput, setWeightInput] = useState("");
   const [repsInput, setRepsInput] = useState("");
-  const [activeWorkoutData, setActiveWorkoutData] = useState({});
+  const [currentExKey, setCurrentExKey] = useState("");
 
   const chartRefs = useRef({});
-
-  // --- תוספת ה-Swipe ---
   const touchStart = useRef(0);
+
+  // Swipe Logic
   const handleTouchStart = (e) => (touchStart.current = e.touches[0].clientX);
   const handleTouchEnd = (e) => {
     const diff = touchStart.current - e.changedTouches[0].clientX;
@@ -55,7 +59,7 @@ export default function App() {
     const token = params.get("access_token");
     if (token) {
       setAccessToken(token);
-      setSyncStatus("מחובר ומסונכרן באופן מלא! 🎉");
+      setSyncStatus("מחובר ומסונכרן! 🎉");
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
@@ -71,51 +75,50 @@ export default function App() {
   };
 
   const createGoogleEvent = async (title, description, dateStr, timeStr) => {
-    if (!accessToken) { alert("היומן אינו מחובר!"); return false; }
+    if (!accessToken) return false;
     const startDateTime = new Date(`${dateStr}T${timeStr}:00`).toISOString();
     const endDateTime = new Date(new Date(`${dateStr}T${timeStr}:00`).getTime() + 60 * 60 * 1000).toISOString();
     const event = { summary: title, description: description, start: { dateTime: startDateTime, timeZone: 'Asia/Jerusalem' }, end: { dateTime: endDateTime, timeZone: 'Asia/Jerusalem' } };
-    try {
-      const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(event)
-      });
-      return response.ok;
-    } catch (err) { console.error(err); return false; }
+    const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(event)
+    });
+    return response.ok;
   };
 
-  const handleAddCustomActivity = async () => {
-    if (!customName) return alert("אנא הזן את שם הפעילות!");
-    const success = await createGoogleEvent(customName, "פעילות חופשית מ-Track & Gain 🏃‍♂️", customDate, customTime);
-    if (success) { alert(`הפעילות "${customName}" סונכרנה בהצלחה!`); setCustomName(""); }
-    else { alert("שגיאה בסנכרון."); }
+  // Tab 0 logic
+  const addToPending = () => {
+    if (!customName) return alert("הזן שם פעילות");
+    setPendingActivities([...pendingActivities, { name: customName, date: customDate, time: customTime }]);
+    setCustomName("");
   };
 
-  // --- תוספת: שמירת כל התרגילים בבת אחת ---
-  const addExerciseToSession = (key) => {
+  const syncAllActivities = async () => {
+    for (let act of pendingActivities) {
+      await createGoogleEvent(act.name, "פעילות מ-Track & Gain", act.date, act.time);
+    }
+    setPendingActivities([]);
+    alert("כל הפעילויות סונכרנו!");
+  };
+
+  // Tab 2 logic
+  const addExerciseToTemp = () => {
     if (!weightInput || !repsInput) return alert("הזן משקל וחזרות");
-    setActiveWorkoutData({...activeWorkoutData, [key]: { weight: weightInput, reps: repsInput }});
+    setTempWorkoutData({...tempWorkoutData, [currentExKey]: { weight: parseFloat(weightInput), reps: parseInt(repsInput) }});
     setWeightInput(""); setRepsInput("");
   };
 
-  const finishAndSaveWorkout = async () => {
-    const rawDate = new Date();
-    const newSession = {
-      id: Date.now(),
-      split: activeWorkflow,
-      date: rawDate.toLocaleDateString('he-IL'),
-      exercises: activeWorkoutData
-    };
-    const newSessionsList = [newSession, ...sessions];
-    setSessions(newSessionsList);
-    localStorage.setItem('gym_sessions', JSON.stringify(newSessionsList));
+  const finalizeWorkout = async () => {
+    const newSession = { id: Date.now(), split: activeWorkflow, date: new Date().toLocaleDateString('he-IL'), exercises: tempWorkoutData };
+    const newSessions = [newSession, ...sessions];
+    setSessions(newSessions);
+    localStorage.setItem('gym_sessions', JSON.stringify(newSessions));
     if (accessToken) {
-       let desc = "אימון משקלים:\n" + Object.keys(activeWorkoutData).map(k => `${EXERCISE_CONFIG[k].name}: ${activeWorkoutData[k].weight}kg x ${activeWorkoutData[k].reps}`).join('\n');
-       await createGoogleEvent(`💪 אימון ${activeWorkflow}`, desc, rawDate.toISOString().split('T')[0], "18:00");
+       let desc = "אימון משקלים:\n" + Object.keys(tempWorkoutData).map(k => `${EXERCISE_CONFIG[k].name}: ${tempWorkoutData[k].weight}kg x ${tempWorkoutData[k].reps}`).join('\n');
+       await createGoogleEvent(`💪 אימון ${activeWorkflow}`, desc, new Date().toISOString().split('T')[0], "18:00");
     }
-    setActiveWorkflow(null); setActiveWorkoutData({});
-    alert("האימון נשמר!");
+    setTempWorkoutData({}); setActiveWorkflow(null);
   };
 
   const buildCharts = () => {
@@ -126,7 +129,7 @@ export default function App() {
       const canvas = document.getElementById(`chart-${key}`);
       if (canvas && dataPoints.length > 0) {
         if (chartRefs.current[key]) chartRefs.current[key].destroy();
-        chartRefs.current[key] = new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ data: dataPoints, borderColor: '#1e40af', borderWidth: 3, tension: 0.15 }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
+        chartRefs.current[key] = new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ data: dataPoints, borderColor: '#1e40af', borderWidth: 3 }] }, options: { responsive: true } });
       }
     });
   };
@@ -135,9 +138,8 @@ export default function App() {
     <div style={styles.container} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <div style={styles.header}>
         <h1 style={styles.title}>TRACK & GAIN</h1>
-        <p style={styles.subtitle}>ריאקט + סנכרון יומן מלא וגרפים</p>
         <div style={styles.tabsNav}>
-          {['📅 יומן', '🎯 מטרות', '📝 אימון', '📊 אנליטיקה'].map((t, i) => (
+          {['📅 יומן', '🎯 מטרות', '📝 אימון', '📊 גרפים'].map((t, i) => (
             <button key={i} style={{...styles.tabBtn, ...(activeTab===i?styles.activeTab:{})}} onClick={()=>setActiveTab(i)}>{t}</button>
           ))}
         </div>
@@ -146,21 +148,23 @@ export default function App() {
       <div style={styles.mainContent}>
         {activeTab === 0 && (
           <div style={styles.card}>
-            <h2 style={styles.cardTitle}>🔗 חיבור ישיר ליומן גוגל</h2>
-            <button style={styles.googleBtn} onClick={handleGoogleLogin}>{accessToken ? "✓ מחובר לחשבון גוגל" : "התחבר לחשבון גוגל"}</button>
-            <p style={{...styles.statusText, color: accessToken ? '#10b981' : '#ef4444'}}>{syncStatus}</p>
-            <input style={styles.input} placeholder="שם פעילות" value={customName} onChange={(e)=>setCustomName(e.target.value)} />
-            <button style={styles.submitBtn} onClick={handleAddCustomActivity}>שלח ליומן ←</button>
+            <button style={styles.googleBtn} onClick={handleGoogleLogin}>{accessToken ? "✓ מחובר" : "התחבר לגוגל"}</button>
+            <input style={styles.input} placeholder="שם פעילות" value={customName} onChange={e=>setCustomName(e.target.value)} />
+            <div style={{display:'flex', gap: 5, marginTop: 10}}>
+              <input style={styles.input} type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} />
+              <input style={styles.input} type="time" value={customTime} onChange={e=>setCustomTime(e.target.value)} />
+            </div>
+            <button style={styles.submitBtn} onClick={addToPending}>הוסף לסל +</button>
+            {pendingActivities.map((act, i) => <div key={i} style={{marginTop: 5, fontSize:'0.8rem'}}>{act.time} - {act.name}</div>)}
+            {pendingActivities.length > 0 && <button style={{...styles.submitBtn, backgroundColor:'#10b981'}} onClick={syncAllActivities}>סנכרן הכל ליומן</button>}
           </div>
         )}
 
         {activeTab === 1 && (
           <div style={styles.card}>
-            <h2 style={styles.cardTitle}>🎯 מטרות לאימון הבא</h2>
-            {sessions.length === 0 ? <p style={styles.emptyState}>אין נתונים.</p> : Object.keys(EXERCISE_CONFIG).map(exKey => {
+            {sessions.length === 0 ? <p>אין נתונים.</p> : Object.keys(EXERCISE_CONFIG).map(exKey => {
               const last = sessions.find(s => s.exercises && s.exercises[exKey]);
-              if (!last) return null;
-              return <div key={exKey} style={styles.targetItem}>{EXERCISE_CONFIG[exKey].name}: {last.exercises[exKey].weight} ק"ג</div>;
+              return last ? <div key={exKey} style={styles.targetItem}>{EXERCISE_CONFIG[exKey].name}: {last.exercises[exKey].weight} ק"ג</div> : null;
             })}
           </div>
         )}
@@ -169,20 +173,19 @@ export default function App() {
           <div style={styles.card}>
             {!activeWorkflow ? (
               <>
-                <h2 style={styles.cardTitle}>מה מפרקים היום?</h2>
-                <button style={styles.bigSplitBtn} onClick={()=>setActiveWorkflow('PUSH')}>🔥 אימון PUSH</button>
-                <button style={styles.bigSplitBtn} onClick={()=>setActiveWorkflow('PULL')}>🔮 אימון PULL</button>
+                <button style={styles.bigSplitBtn} onClick={() => {setActiveWorkflow('PUSH'); setCurrentExKey(WORKFLOWS.PUSH[0])}}>אימון PUSH</button>
+                <button style={styles.bigSplitBtn} onClick={() => {setActiveWorkflow('PULL'); setCurrentExKey(WORKFLOWS.PULL[0])}}>אימון PULL</button>
               </>
             ) : (
               <>
-                <h2 style={styles.cardTitle}>הוסף תרגילים ל-{activeWorkflow}</h2>
-                <select style={styles.input} onChange={(e) => {/* לוגיקת בחירת תרגיל */}}>
-                    {WORKFLOWS[activeWorkflow].map(k => <option key={k} value={k}>{EXERCISE_CONFIG[k].name}</option>)}
+                <select style={styles.input} onChange={e => setCurrentExKey(e.target.value)}>
+                  {WORKFLOWS[activeWorkflow].map(k => <option key={k} value={k}>{EXERCISE_CONFIG[k].name}</option>)}
                 </select>
                 <input style={styles.input} placeholder="משקל" value={weightInput} onChange={e=>setWeightInput(e.target.value)}/>
                 <input style={styles.input} placeholder="חזרות" value={repsInput} onChange={e=>setRepsInput(e.target.value)}/>
-                <button style={styles.submitBtn} onClick={() => addExerciseToSession(WORKFLOWS[activeWorkflow][0])}>הוסף לסל</button>
-                <button style={{...styles.submitBtn, backgroundColor:'#10b981'}} onClick={finishAndSaveWorkout}>סיום ושמירה מלאה</button>
+                <button style={styles.submitBtn} onClick={addExerciseToTemp}>הוסף לסל</button>
+                <button style={{...styles.submitBtn, backgroundColor:'#10b981'}} onClick={finalizeWorkout}>סיום ושמירה</button>
+                <button style={{...styles.submitBtn, backgroundColor:'#e2e8f0', color:'#475569'}} onClick={()=>setActiveWorkflow(null)}>ביטול</button>
               </>
             )}
           </div>
@@ -199,18 +202,15 @@ export default function App() {
 const styles = {
   container: { direction: 'rtl', fontFamily: 'sans-serif', backgroundColor: '#f0f4f8', minHeight: '100vh', padding: '20px 10px' },
   header: { maxWidth: 500, margin: '0 auto 20px auto', textAlign: 'center' },
-  title: { color: '#1e40af', margin: 0, fontWeight: 800, fontSize: '2rem' },
+  title: { color: '#1e40af', margin: 0, fontSize: '2rem' },
   tabsNav: { display: 'flex', backgroundColor: '#fff', padding: 4, borderRadius: 12, border: '1px solid #cbd5e1', gap: 4 },
   tabBtn: { flex: 1, padding: '10px', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 8, color: '#64748b', fontWeight: 'bold' },
   activeTab: { backgroundColor: '#1e40af', color: '#fff' },
   mainContent: { maxWidth: 500, margin: '0 auto' },
-  card: { backgroundColor: '#fff', borderRadius: 16, padding: 20, border: '1px solid #cbd5e1' },
-  cardTitle: { margin: '0 0 15px 0', fontSize: '1.2rem', color: '#1e40af', fontWeight: '700' },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 20, border: '1px solid #cbd5e1', marginBottom: 15 },
   input: { width: '100%', padding: 12, borderRadius: 8, border: '1px solid #cbd5e1', marginTop: 10, boxSizing: 'border-box' },
   submitBtn: { width: '100%', padding: 14, backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 'bold', cursor: 'pointer', marginTop: 10 },
   bigSplitBtn: { width: '100%', padding: 20, fontSize: '1.15rem', fontWeight: 'bold', backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: 12, marginTop: 15, cursor: 'pointer' },
   googleBtn: { width: '100%', padding: 14, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: 10, fontWeight: 'bold', cursor: 'pointer', color: '#1e40af' },
-  statusText: { fontSize: '0.85rem', textAlign: 'center', marginTop: 8, fontWeight: 'bold' },
-  emptyState: { textAlign: 'center', color: '#64748b', fontStyle: 'italic' },
   targetItem: { padding: '12px 0', borderBottom: '1px solid #f1f5f9' }
 };
